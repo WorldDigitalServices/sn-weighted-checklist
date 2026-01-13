@@ -107,32 +107,10 @@
         } catch (e) { return []; }
       }
 
-      function saveToSN(text) {
-        if (!snNote || !sessionKey) return;
-        try {
-          window.parent.postMessage({
-            action: 'save-items',
-            data: {
-              items: [{
-                uuid: snNote.uuid,
-                content_type: snNote.content_type,
-                content: {
-                  title: snNote.content.title,
-                  text: text,
-                  references: snNote.content.references || [],
-                  appData: snNote.content.appData || {}
-                }
-              }]
-            },
-            sessionKey: sessionKey
-          }, '*');
-        } catch(e) {}
-      }
-
       function saveData() {
         var text = JSON.stringify({ version: 1, items: items });
         try { localStorage.setItem('weighted-checklist', text); } catch(e) {}
-        saveToSN(text);
+        // TODO: Standard Notes save integration
       }
 
       function render() {
