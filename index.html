@@ -6,13 +6,34 @@
   <title>Weighted Checklist</title>
   <style>
     :root {
-      --bg: #ffffff;
-      --fg: #1a1a1a;
-      --border: #e0e0e0;
-      --contrast-bg: #f5f5f5;
-      --info: #086dd6;
-      --neutral: #8e8e8e;
-      --danger: #d64343;
+      --bg: var(--sn-stylekit-background-color, #ffffff);
+      --fg: var(--sn-stylekit-foreground-color, #1a1a1a);
+      --border: var(--sn-stylekit-border-color, #e0e0e0);
+      --contrast-bg: var(--sn-stylekit-contrast-background-color, #f5f5f5);
+      --info: var(--sn-stylekit-info-color, #086dd6);
+      --neutral: var(--sn-stylekit-neutral-color, #8e8e8e);
+      --danger: var(--sn-stylekit-danger-color, #d64343);
+    }
+    /* Dark mode for standalone use */
+    @media (prefers-color-scheme: dark) {
+      :root:not(.light-mode) {
+        --sn-stylekit-background-color: #1a1a1a;
+        --sn-stylekit-foreground-color: #e8e8e8;
+        --sn-stylekit-border-color: #404040;
+        --sn-stylekit-contrast-background-color: #2a2a2a;
+        --sn-stylekit-info-color: #5eb3f3;
+        --sn-stylekit-neutral-color: #888888;
+        --sn-stylekit-danger-color: #e57373;
+      }
+    }
+    :root.dark-mode {
+      --sn-stylekit-background-color: #1a1a1a;
+      --sn-stylekit-foreground-color: #e8e8e8;
+      --sn-stylekit-border-color: #404040;
+      --sn-stylekit-contrast-background-color: #2a2a2a;
+      --sn-stylekit-info-color: #5eb3f3;
+      --sn-stylekit-neutral-color: #888888;
+      --sn-stylekit-danger-color: #e57373;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { 
@@ -182,6 +203,9 @@
       font-size: 13px;
       color: var(--neutral);
       margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
     }
     .clear-btn {
       font-size: 13px;
@@ -193,6 +217,17 @@
       margin-left: 12px;
     }
     .clear-btn:hover { color: var(--danger); }
+    .theme-toggle {
+      margin-left: auto;
+      font-size: 18px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      opacity: 0.6;
+    }
+    .theme-toggle:hover { opacity: 1; background: var(--contrast-bg); }
   </style>
 </head>
 <body>
@@ -200,14 +235,46 @@
 
   <script>
     (function() {
-      // Weight colors
-      var COLORS = {
+      // Weight colors - will be adjusted for dark mode
+      var COLORS_LIGHT = {
         1: { bg: '#e8f0fe', border: '#94a3b8', text: '#475569' },
         2: { bg: '#e0f2fe', border: '#38bdf8', text: '#0369a1' },
         3: { bg: '#fef3c7', border: '#fbbf24', text: '#92400e' },
         4: { bg: '#ffedd5', border: '#fb923c', text: '#c2410c' },
         5: { bg: '#fee2e2', border: '#f87171', text: '#b91c1c' }
       };
+      var COLORS_DARK = {
+        1: { bg: '#1e293b', border: '#64748b', text: '#94a3b8' },
+        2: { bg: '#0c4a6e', border: '#0ea5e9', text: '#7dd3fc' },
+        3: { bg: '#713f12', border: '#f59e0b', text: '#fcd34d' },
+        4: { bg: '#7c2d12', border: '#f97316', text: '#fdba74' },
+        5: { bg: '#7f1d1d', border: '#ef4444', text: '#fca5a5' }
+      };
+      
+      function getColors() {
+        return isDarkMode() ? COLORS_DARK : COLORS_LIGHT;
+      }
+      
+      function isDarkMode() {
+        if (document.documentElement.classList.contains('dark-mode')) return true;
+        if (document.documentElement.classList.contains('light-mode')) return false;
+        // Check if SN has set dark theme via CSS variables
+        var bg = getComputedStyle(document.documentElement).getPropertyValue('--sn-stylekit-background-color').trim();
+        if (bg && bg !== '#ffffff') {
+          // Parse the color to check if it's dark
+          var match = bg.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+          if (match) {
+            var r = parseInt(match[1], 16);
+            var g = parseInt(match[2], 16);
+            var b = parseInt(match[3], 16);
+            var luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            return luminance < 0.5;
+          }
+        }
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+
+      var isStandalone = true; // Will be set to false if SN responds
 
       // State
       var items = [];
@@ -324,6 +391,7 @@
         // Component registered
         if (data.action === 'component-registered') {
           sessionKey = data.sessionKey;
+          isStandalone = false;
           if (data.data) {
             if (data.data.environment === 'mobile') isMobile = true;
           }
@@ -407,6 +475,9 @@
           link.href = urls[j];
           document.head.appendChild(link);
         }
+
+        // Re-render after a short delay to pick up new CSS variables
+        setTimeout(function() { render(); }, 100);
       }
 
       // Escape HTML
@@ -421,6 +492,7 @@
         var app = document.getElementById('app');
         var active = [];
         var done = [];
+        var COLORS = getColors();
         
         for (var i = 0; i < items.length; i++) {
           if (items[i].done) done.push(items[i]);
@@ -432,14 +504,21 @@
 
         var html = '';
 
-        // Progress
+        // Progress and controls row
+        html += '<div class="progress">';
         if (totalTasks > 0) {
-          html += '<div class="progress">' + doneTasks + '/' + totalTasks + ' completed';
+          html += '<span>' + doneTasks + '/' + totalTasks + ' completed</span>';
           if (doneTasks > 0) {
             html += '<button class="clear-btn" id="clearDone">Clear completed</button>';
           }
-          html += '</div>';
+        } else if (isStandalone) {
+          html += '<span>&nbsp;</span>'; // Spacer
         }
+        // Theme toggle (only show in standalone mode)
+        if (isStandalone) {
+          html += '<button class="theme-toggle" id="themeToggle" title="Toggle dark mode">' + (isDarkMode() ? '☀️' : '🌙') + '</button>';
+        }
+        html += '</div>';
 
         // Add row
         html += '<div class="add-row">';
@@ -457,14 +536,14 @@
 
         // Active items
         for (var i = 0; i < active.length; i++) {
-          html += renderItem(active[i], false);
+          html += renderItem(active[i], false, COLORS);
         }
 
         // Completed divider
         if (done.length > 0) {
           html += '<div class="divider">Completed</div>';
           for (var j = 0; j < done.length; j++) {
-            html += renderItem(done[j], true);
+            html += renderItem(done[j], true, COLORS);
           }
         }
 
@@ -474,7 +553,7 @@
       }
 
       // Render single item
-      function renderItem(item, isDone) {
+      function renderItem(item, isDone, COLORS) {
         var c = COLORS[item.weight] || COLORS[3];
         var html = '';
         
@@ -558,6 +637,9 @@
         }
 
         if (clearDone) clearDone.onclick = function(e) { e.preventDefault(); clearCompleted(); };
+
+        var themeToggle = document.getElementById('themeToggle');
+        if (themeToggle) themeToggle.onclick = function(e) { e.preventDefault(); toggleTheme(); };
 
         if (newSubInput) {
           newSubInput.focus();
@@ -685,6 +767,20 @@
         render();
       }
 
+      function toggleTheme() {
+        var root = document.documentElement;
+        if (root.classList.contains('dark-mode')) {
+          root.classList.remove('dark-mode');
+          root.classList.add('light-mode');
+          try { localStorage.setItem('wds-checklist-theme', 'light'); } catch(e) {}
+        } else {
+          root.classList.remove('light-mode');
+          root.classList.add('dark-mode');
+          try { localStorage.setItem('wds-checklist-theme', 'dark'); } catch(e) {}
+        }
+        render();
+      }
+
       // Subtask actions
       function startAddSub(id) {
         if (locked) return;
@@ -775,6 +871,16 @@
 
       // Initialize
       function init() {
+        // Load saved theme preference
+        try {
+          var savedTheme = localStorage.getItem('wds-checklist-theme');
+          if (savedTheme === 'dark') {
+            document.documentElement.classList.add('dark-mode');
+          } else if (savedTheme === 'light') {
+            document.documentElement.classList.add('light-mode');
+          }
+        } catch (e) {}
+
         // Load from localStorage first
         try {
           var saved = localStorage.getItem('wds-weighted-checklist');
