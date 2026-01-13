@@ -1,0 +1,11 @@
+{
+  "identifier": "com.wds.weighted-checklist",
+  "name": "Weighted Checklist",
+  "content_type": "SN|Component",
+  "area": "editor-editor",
+  "version": "1.0.0",
+  "description": "A priority checklist with weighted items (1-5 scale)",
+  "url": "https://worlddigitalservices.github.io/sn-weighted-checklist/index.html",
+  "download_url": "https://worlddigitalservices.github.io/sn-weighted-checklist/latest.zip",
+  "latest_url": "https://worlddigitalservices.github.io/sn-weighted-checklist/ext.json"
+}

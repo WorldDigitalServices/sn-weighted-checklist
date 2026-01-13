@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Weighted Checklist</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #1a1a1a;
+      --border: #e0e0e0;
+      --info: #086dd6;
+      --neutral: #8e8e8e;
+      --danger: #d64343;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { 
+      min-height: 100%; 
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 16px;
+      color: var(--fg);
+      line-height: 1.5;
+      -webkit-overflow-scrolling: touch;
+    }
+    .container { padding: 16px; }
+    .add-row { display: flex; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+    .add-input { 
+      flex: 1; padding: 12px; font-size: 16px; border: 1px solid var(--border); 
+      border-radius: 8px; background: var(--bg); color: var(--fg); outline: none;
+    }
+    .add-input:focus { border-color: var(--info); }
+    .add-btn { 
+      width: 48px; height: 48px; border: none; border-radius: 8px; 
+      background: var(--info); color: white; font-size: 24px; cursor: pointer;
+    }
+    .add-btn:disabled { opacity: 0.4; }
+    .items { display: flex; flex-direction: column; gap: 8px; }
+    .item { 
+      display: flex; align-items: center; gap: 10px; padding: 12px; 
+      border: 1px solid; border-left-width: 4px; border-radius: 8px;
+    }
+    .item.done { opacity: 0.6; background: #f5f5f5 !important; border-color: var(--border) !important; }
+    .check-btn, .weight-btn, .del-btn { 
+      width: 44px; height: 44px; min-width: 44px; border: none; 
+      border-radius: 6px; background: transparent; font-size: 18px; cursor: pointer;
+    }
+    .weight-btn:disabled { opacity: 0.3; }
+    .del-btn { color: var(--neutral); }
+    .del-btn:hover { color: var(--danger); }
+    .item-text { flex: 1; word-break: break-word; cursor: pointer; }
+    .item.done .item-text { text-decoration: line-through; color: var(--neutral); }
+    .weight-box { display: flex; align-items: center; gap: 4px; }
+    .weight-num { 
+      min-width: 28px; height: 28px; display: flex; align-items: center; 
+      justify-content: center; font-size: 14px; font-weight: 600; 
+      background: rgba(0,0,0,0.08); border-radius: 4px;
+    }
+    .item.done .weight-box { display: none; }
+    .divider { 
+      display: flex; align-items: center; gap: 12px; margin: 12px 0; 
+      color: var(--neutral); font-size: 13px; text-transform: uppercase;
+    }
+    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    .empty { text-align: center; padding: 48px; color: var(--neutral); }
+    .edit-input { 
+      flex: 1; padding: 8px; font-size: 16px; border: 1px solid var(--info); 
+      border-radius: 4px; outline: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container" id="app"></div>
+
+  <script>
+    (function() {
+      var COLORS = {
+        1: { bg: '#f0f4f8', border: '#94a3b8', text: '#475569' },
+        2: { bg: '#e0f2fe', border: '#38bdf8', text: '#0369a1' },
+        3: { bg: '#fef3c7', border: '#fbbf24', text: '#92400e' },
+        4: { bg: '#ffedd5', border: '#fb923c', text: '#c2410c' },
+        5: { bg: '#fee2e2', border: '#f87171', text: '#b91c1c' }
+      };
+
+      var items = [];
+      var locked = false;
+      var editingId = null;
+      var snNote = null;
+      var sessionKey = null;
+
+      function genId() {
+        return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+      }
+
+      function sortItems(arr) {
+        var active = arr.filter(function(i) { return !i.done; });
+        active.sort(function(a, b) { return b.weight - a.weight; });
+        var done = arr.filter(function(i) { return i.done; });
+        return active.concat(done);
+      }
+
+      function parseData(text) {
+        if (!text) return [];
+        try {
+          var d = JSON.parse(text);
+          return Array.isArray(d.items) ? sortItems(d.items) : [];
+        } catch (e) { return []; }
+      }
+
+      function saveToSN(text) {
+        if (!snNote || !sessionKey) return;
+        try {
+          window.parent.postMessage({
+            action: 'save-items',
+            data: {
+              items: [{
+                uuid: snNote.uuid,
+                content_type: snNote.content_type,
+                content: {
+                  title: snNote.content.title,
+                  text: text,
+                  references: snNote.content.references || [],
+                  appData: snNote.content.appData || {}
+                }
+              }]
+            },
+            sessionKey: sessionKey
+          }, '*');
+        } catch(e) {}
+      }
+
+      function saveData() {
+        var text = JSON.stringify({ version: 1, items: items });
+        try { localStorage.setItem('weighted-checklist', text); } catch(e) {}
+        saveToSN(text);
+      }
+
+      function render() {
+        var app = document.getElementById('app');
+        var active = items.filter(function(i) { return !i.done; });
+        var done = items.filter(function(i) { return i.done; });
+
+        var html = '<div class="add-row">';
+        html += '<input type="text" class="add-input" id="newItem" placeholder="Add new item..." ' + (locked ? 'disabled' : '') + '>';
+        html += '<button class="add-btn" id="addBtn" ' + (locked ? 'disabled' : '') + '>+</button>';
+        html += '</div>';
+        html += '<div class="items">';
+
+        if (items.length === 0) {
+          html += '<div class="empty"><p style="font-size:18px;font-weight:500;margin-bottom:4px;">No items yet</p><p style="opacity:0.7;">Add your first task above</p></div>';
+        }
+
+        for (var i = 0; i < active.length; i++) {
+          var item = active[i];
+          var c = COLORS[item.weight];
+          html += '<div class="item" data-id="' + item.id + '" style="background:' + c.bg + ';border-color:' + c.border + ';">';
+          html += '<button class="check-btn" data-action="toggle" style="color:' + c.text + ';">☐</button>';
+          
+          if (editingId === item.id) {
+            html += '<input type="text" class="edit-input" id="editInput" value="' + item.text.replace(/"/g, '&quot;') + '">';
+          } else {
+            html += '<span class="item-text" data-action="edit" style="color:' + c.text + ';">' + escapeHtml(item.text) + '</span>';
+          }
+          
+          html += '<div class="weight-box">';
+          html += '<button class="weight-btn" data-action="down" style="color:' + c.text + ';" ' + (item.weight <= 1 || locked ? 'disabled' : '') + '>▼</button>';
+          html += '<span class="weight-num" style="color:' + c.text + ';">' + item.weight + '</span>';
+          html += '<button class="weight-btn" data-action="up" style="color:' + c.text + ';" ' + (item.weight >= 5 || locked ? 'disabled' : '') + '>▲</button>';
+          html += '</div>';
+          html += '<button class="del-btn" data-action="delete" ' + (locked ? 'disabled' : '') + '>✕</button>';
+          html += '</div>';
+        }
+
+        if (done.length > 0) {
+          html += '<div class="divider">Completed</div>';
+          for (var j = 0; j < done.length; j++) {
+            var doneItem = done[j];
+            html += '<div class="item done" data-id="' + doneItem.id + '">';
+            html += '<button class="check-btn" data-action="toggle">☑</button>';
+            html += '<span class="item-text">' + escapeHtml(doneItem.text) + '</span>';
+            html += '<button class="del-btn" data-action="delete" ' + (locked ? 'disabled' : '') + '>✕</button>';
+            html += '</div>';
+          }
+        }
+
+        html += '</div>';
+        app.innerHTML = html;
+        attachEvents();
+      }
+
+      function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function attachEvents() {
+        var addBtn = document.getElementById('addBtn');
+        var newInput = document.getElementById('newItem');
+        var editInput = document.getElementById('editInput');
+
+        if (addBtn) addBtn.onclick = addItem;
+        if (newInput) newInput.onkeydown = function(e) { if (e.key === 'Enter') addItem(); };
+        
+        if (editInput) {
+          editInput.focus();
+          editInput.select();
+          editInput.onblur = function() { saveEdit(); };
+          editInput.onkeydown = function(e) { if (e.key === 'Enter') saveEdit(); };
+        }
+
+        var itemEls = document.querySelectorAll('.item');
+        for (var i = 0; i < itemEls.length; i++) {
+          (function(itemEl) {
+            var id = itemEl.getAttribute('data-id');
+            itemEl.onclick = function(e) {
+              var action = e.target.getAttribute('data-action');
+              if (action === 'toggle') toggle(id);
+              else if (action === 'edit') startEdit(id);
+              else if (action === 'delete') delItem(id);
+              else if (action === 'up') changeWeight(id, 1);
+              else if (action === 'down') changeWeight(id, -1);
+            };
+          })(itemEls[i]);
+        }
+      }
+
+      function addItem() {
+        var inp = document.getElementById('newItem');
+        var text = inp.value.trim();
+        if (!text || locked) return;
+        items.push({ id: genId(), text: text, weight: 3, done: false, createdAt: new Date().toISOString() });
+        items = sortItems(items);
+        saveData();
+        render();
+      }
+
+      function toggle(id) {
+        if (locked) return;
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].id === id) {
+            items[i].done = !items[i].done;
+            break;
+          }
+        }
+        items = sortItems(items);
+        saveData();
+        render();
+      }
+
+      function changeWeight(id, delta) {
+        if (locked) return;
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].id === id) {
+            items[i].weight = Math.max(1, Math.min(5, items[i].weight + delta));
+            break;
+          }
+        }
+        items = sortItems(items);
+        saveData();
+        render();
+      }
+
+      function delItem(id) {
+        if (locked) return;
+        items = items.filter(function(i) { return i.id !== id; });
+        saveData();
+        render();
+      }
+
+      function startEdit(id) {
+        if (locked) return;
+        editingId = id;
+        render();
+      }
+
+      function saveEdit() {
+        var inp = document.getElementById('editInput');
+        if (inp && inp.value.trim() && editingId) {
+          for (var i = 0; i < items.length; i++) {
+            if (items[i].id === editingId) {
+              items[i].text = inp.value.trim();
+              break;
+            }
+          }
+          saveData();
+        }
+        editingId = null;
+        render();
+      }
+
+      // Standard Notes communication via postMessage
+      function initSN() {
+        window.addEventListener('message', function(event) {
+          try {
+            var data = event.data;
+            if (typeof data === 'string') {
+              try { data = JSON.parse(data); } catch(e) { return; }
+            }
+            if (!data || typeof data !== 'object') return;
+
+            // Handle component registration response
+            if (data.action === 'component-registered') {
+              sessionKey = data.sessionKey;
+              // Request the current note
+              window.parent.postMessage({
+                action: 'stream-context-item',
+                sessionKey: sessionKey
+              }, '*');
+            }
+
+            // Handle note data
+            if (data.action === 'reply' && data.original && data.original.action === 'stream-context-item') {
+              if (data.data && data.data.item) {
+                handleNoteData(data.data.item);
+              }
+            }
+
+            // Handle streamed item updates
+            if (data.action === 'stream-context-item' && data.data && data.data.item) {
+              handleNoteData(data.data.item);
+            }
+
+            // Direct item format (some SN versions)
+            if (data.item && data.item.content) {
+              handleNoteData(data.item);
+            }
+
+            // Even more direct format
+            if (data.content && data.content.text !== undefined) {
+              handleNoteData(data);
+            }
+          } catch(e) {
+            console.log('SN message error:', e);
+          }
+        });
+
+        // Register with Standard Notes
+        if (window.parent !== window) {
+          try {
+            window.parent.postMessage({
+              action: 'component-registered',
+              componentData: {
+                identifier: 'com.wds.weighted-checklist'
+              }
+            }, '*');
+
+            // Also try stream-context-item directly
+            setTimeout(function() {
+              window.parent.postMessage({ action: 'stream-context-item' }, '*');
+            }, 100);
+          } catch(e) {}
+        }
+      }
+
+      function handleNoteData(item) {
+        snNote = item;
+        if (item.content && item.content.text) {
+          items = parseData(item.content.text);
+        } else {
+          items = [];
+        }
+        
+        // Check locked status
+        if (item.content && item.content.appData) {
+          var snData = item.content.appData['org.standardnotes.sn'];
+          if (snData && snData.locked) {
+            locked = true;
+          } else {
+            locked = false;
+          }
+        }
+        
+        render();
+      }
+
+      // Initialize
+      try {
+        items = parseData(localStorage.getItem('weighted-checklist') || '');
+      } catch(e) {}
+
+      // Render immediately
+      render();
+
+      // Then try to connect to Standard Notes
+      initSN();
+    })();
+  </script>
+</body>
+</html>
